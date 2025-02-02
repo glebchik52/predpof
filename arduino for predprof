@@ -1,21 +1,70 @@
-#include <VirtualWire.h>
+#include <Servo.h>
+#include <SPI.h>
+#include <nRF24L01.h>
+#include <RF24.h>
+
+// Определение пинов
+#define CE_PIN 9
+#define CSN_PIN 10
+
+// Инициализация объектов
+RF24 radio(CE_PIN, CSN_PIN);
+Servo servo1; // Первый сервомотор
+Servo servo2; // Второй сервомотор
+
+// Пины для джойстика
+int Pin_VRX = A0; // Пин оси X джойстика
+int Pin_VRY = A1; // Пин оси Y джойстика
+int Button_Pin = 2; // Пин кнопки джойстика
 
 void setup() {
-    Serial.begin(9600);
-    vw_setup(2000); // Установка скорости передачи данных
-    vw_set_rx_pin(3); // Установка пина для приема данных
-    vw_rx_start(); // Запуск приема
+    Serial.begin(9600); // Устанавливаем скорость обмена данными 9600 бод
+
+    // Настройка сервомоторов
+    servo1.attach(3); // Подключение первого сервомотора к пину 3
+    servo2.attach(5); // Подключение второго сервомотора к пину 5
+
+    // Настройка NRF24L01
+    radio.begin();
+    radio.setChannel(76); // Установите канал (от 0 до 125)
+    radio.setDataRate(RF24_1MBPS); // Установите скорость передачи данных
+    radio.setPALevel(RF24_PA_HIGH); // Установите уровень мощности
+    radio.openWritingPipe(0xF0F0F0F0E1LL); // Уникальный идентификатор для передачи
+    radio.openReadingPipe(1, 0xF0F0F0F0E2LL); // Уникальный идентификатор для приема
+    radio.startListening(); // Начинаем прослушивание
+
+    pinMode(Button_Pin, INPUT_PULLUP); // Переводим пин кнопки в режим ввода с подтяжкой вверх
 }
 
 void loop() {
-    uint8_t buf[10]; // Буфер для хранения полученных данных
-    uint8_t buflen = sizeof(buf);
+    // Чтение значений с джойстика
+    int pos1 = analogRead(Pin_VRX); // Чтение значения по оси X
+    int pos2 = analogRead(Pin_VRY); // Чтение значения по оси Y
 
-    if (vw_get_message(buf, &buflen)) { // Если получено сообщение
-        Serial.print("Received: ");
-        for (int i = 0; i < buflen; i++) {
-            Serial.print((char)buf[i]); // Выводим полученное сообщение
-        }
-        Serial.println();
+    pos1 = map(pos1, 0, 1023, 0, 180); // Преобразование значения в диапазон 0-180 для первого сервомотора
+    pos2 = map(pos2, 0, 1023, 0, 180); // Преобразование значения в диапазон 0-180 для второго сервомотора
+
+    servo1.write(pos1); // Установка угла первого сервомотора
+    servo2.write(pos2); // Установка угла второго сервомотора
+
+    // Проверка состояния кнопки джойстика
+    if (digitalRead(Button_Pin) == LOW) { // Если кнопка нажата
+        Serial.println("Button clicked");
+        radio.stopListening(); // Остановить прослушивание перед отправкой данных
+        
+        char text[] = "Button Pressed"; 
+        radio.write(&text, sizeof(text)); // Отправка сообщения
+        
+        radio.startListening(); // Возобновить прослушивание
     }
+
+    // Проверка на наличие доступных сообщений
+    if (radio.available()) {
+        char text[32] = "";
+        radio.read(&text, sizeof(text));
+        Serial.print("Received: ");
+        Serial.println(text);
+    }
+
+    delay(100); // Задержка для стабильности работы
 }
